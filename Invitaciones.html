@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Invitaciones - Salón M&M</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Librería para generar códigos QR -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <!-- Librerías para ZIP y guardar archivos -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .invitation-card {
+            width: 300px; /* Ancho de la tarjeta */
+            height: 450px; /* Alto de la tarjeta */
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin: 15px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background-color: #ffffff; /* Fallback si no hay imagen */
+            font-family: 'Inter', sans-serif;
+            page-break-inside: avoid; /* Evita que la tarjeta se rompa al imprimir */
+        }
+        .card-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            z-index: 0;
+        }
+        .card-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 20px;
+            text-align: center;
+            /* El color de texto se establecerá dinámicamente por JS */
+        }
+        /* Los tamaños de fuente se establecerán dinámicamente por JS */
+        .event-title, .guest-name, .guest-table {
+            font-weight: bold; /* Mantenemos negrita base */
+            margin-bottom: 10px;
+        }
+        .event-title { text-transform: uppercase; }
+
+        .qr-code-canvas {
+            border: 5px solid white; /* Borde blanco alrededor del QR */
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            border-radius: 8px; /* Bordes ligeramente redondeados para el QR */
+            background-color: white; /* Asegura un fondo blanco para el QR */
+        }
+
+        /* Estilos para impresión */
+        @media print {
+            body { background-color: #fff !important; margin: 0; padding: 0; }
+            .container { box-shadow: none !important; padding: 0 !important; margin: 0 !important; width: auto !important; }
+            .header, .controls, .info-message { display: none !important; } /* Oculta elementos no deseados en la impresión */
+            .invitation-card {
+                margin: 10mm; /* Márgenes para cada tarjeta impresa */
+                box-shadow: none; /* Sin sombra en la impresión */
+                border: 1px solid #ccc; /* Borde sutil para recortar */
+                page-break-after: always; /* Cada tarjeta en una nueva página */
+            }
+            .invitation-card:last-child {
+                page-break-after: auto; /* La última tarjeta no fuerza una nueva página */
+            }
+            .card-background { opacity: 1; } /* Imagen a opacidad completa en impresión */
+        }
+
+        /* Mensaje de carga para la descarga de invitaciones */
+        #loading-invitations-message {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            z-index: 1000;
+            font-size: 1.2em;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-900">Generador de Invitaciones</h1>
+            <p id="event-name-header" class="text-lg text-indigo-600 font-semibold mt-2">&nbsp;</p>
+        </header>
+
+        <div class="controls bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-2xl font-semibold mb-4">Configuración de Invitaciones</h2>
+            <div class="mb-4">
+                <label for="imageFileInput" class="block text-sm font-medium text-gray-700 mb-2">Cargar Imagen de Fondo (opcional):</label>
+                <input type="file" id="imageFileInput" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                <p class="text-xs text-gray-500 mt-1">Selecciona una imagen de tu PC. Si no seleccionas, se usará un fondo simple.</p>
+            </div>
+            <div class="mb-4">
+                <label for="fontSelect" class="block text-sm font-medium text-gray-700 mb-2">Seleccionar Fuente:</label>
+                <select id="fontSelect" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="Inter, sans-serif">Inter (Predeterminada)</option>
+                    <option value="Arial, sans-serif">Arial</option>
+                    <option value="Verdana, sans-serif">Verdana</option>
+                    <option value="Georgia, serif">Georgia</option>
+                    <option value="Times New Roman, serif">Times New Roman</option>
+                    <option value="Courier New, monospace">Courier New</option>
+                </select>
+            </div>
+            <div class="mb-4">
+                <label for="fontSizeSelect" class="block text-sm font-medium text-gray-700 mb-2">Tamaño de Fuente:</label>
+                <select id="fontSizeSelect" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="normal">Normal</option>
+                    <option value="large">Grande</option>
+                    <option value="xlarge">Muy Grande</option>
+                </select>
+            </div>
+            <div class="mb-6">
+                <label for="fontColorInput" class="block text-sm font-medium text-gray-700 mb-2">Color de Fuente:</label>
+                <input type="color" id="fontColorInput" value="#333333" class="w-full h-10 p-1 border border-gray-300 rounded-md shadow-sm">
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button id="generateCardsBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md shadow-sm transition-transform transform hover:scale-105">
+                    Generar Invitaciones en Pantalla
+                </button>
+                <button id="downloadAllInvitationsBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-md shadow-sm transition-transform transform hover:scale-105">
+                    Descargar Todas las Invitaciones (PNG)
+                </button>
+            </div>
+        </div>
+
+        <div id="loading-state" class="text-center py-10 text-gray-500 hidden">
+            <p>Cargando invitados y generando invitaciones...</p>
+        </div>
+        <div id="empty-state" class="text-center py-10 text-gray-500 hidden">
+            <p>No hay invitados registrados para este evento.</p>
+            <p class="text-sm mt-2">Asegúrate de haber añadido invitados desde el panel de administración.</p>
+        </div>
+        <div id="error-state" class="text-center py-10 text-red-500 hidden">
+            <p>Error al cargar los invitados. Por favor, verifica el ID del evento y tu conexión.</p>
+        </div>
+
+        <div id="invitation-cards-container" class="flex flex-wrap justify-center gap-6 p-4">
+            <!-- Las tarjetas de invitación se generarán aquí -->
+        </div>
+
+        <div class="mt-8 text-center">
+            <a href="selector_de_eventos.html" class="text-indigo-600 hover:text-indigo-800 font-medium">← Volver al Panel de Eventos</a>
+        </div>
+    </div>
+
+    <!-- Mensaje de carga para la descarga de invitaciones -->
+    <div id="loading-invitations-message">Generando invitaciones... Esto puede tardar un momento.</div>
+
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        console.log("Script invitaciones.html iniciado."); // Actualizado el log con el nombre del archivo
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, doc, getDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        
+        // Configuración de Firebase (usando la misma API Key que en admin_invitados.html)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDtr9JCvgHriGZNfk1Exw-wl6zXGRrzawE", 
+            authDomain: "salon-de-eventos-mm.firebaseapp.com",
+            projectId: "salon-de-eventos-mm",
+            storageBucket: "salon-de-eventos-mm.firebasestorage.app",
+            messagingSenderId: "1026723246426",
+            appId: "1:1026723246426:web:518abd5aecd6e279bc0363",
+            measurementId: "G-6QHQ0GDS25"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let guestsCollection;
+        let eventId;
+        let eventName; // Para almacenar el nombre del evento
+        let allGuests = []; // Almacena todos los invitados del evento
+        let backgroundImageDataUrl = ''; // Para almacenar la imagen de fondo cargada
+
+        // Referencias a elementos del DOM
+        const eventNameHeader = document.getElementById('event-name-header');
+        const imageFileInput = document.getElementById('imageFileInput'); // Nuevo input de tipo file
+        const fontSelect = document.getElementById('fontSelect'); // Nuevo selector de fuente
+        const fontSizeSelect = document.getElementById('fontSizeSelect'); // Nuevo selector de tamaño de fuente
+        const fontColorInput = document.getElementById('fontColorInput'); // Nuevo input de color de fuente
+        const generateCardsBtn = document.getElementById('generateCardsBtn');
+        const downloadAllInvitationsBtn = document.getElementById('downloadAllInvitationsBtn'); // Nuevo botón de descarga
+        const invitationCardsContainer = document.getElementById('invitation-cards-container');
+        const loadingState = document.getElementById('loading-state');
+        const emptyState = document.getElementById('empty-state');
+        const errorState = document.getElementById('error-state');
+        const loadingInvitationsMessage = document.getElementById('loading-invitations-message'); // Mensaje de carga
+
+        // Definición de tamaños de fuente en píxeles para diferentes configuraciones
+        // Estos tamaños son para la previsualización en pantalla (300px de ancho)
+        const FONT_SIZES_PX_SCREEN = {
+            'normal': {
+                eventTitle: 35,
+                guestName: 25,
+                guestTable: 19
+            },
+            'large': {
+                eventTitle: 45,
+                guestName: 32,
+                guestTable: 24
+            },
+            'xlarge': {
+                eventTitle: 55,
+                guestName: 40,
+                guestTable: 30
+            }
+        };
+
+        // Definición de tamaños de fuente en píxeles para la descarga (1200px de ancho)
+        // Escalado por un factor de 4 (1200 / 300 = 4)
+        const FONT_SIZES_PX_DOWNLOAD = {
+            'normal': {
+                eventTitle: 35 * 4, // 140px
+                guestName: 25 * 4,  // 100px
+                guestTable: 19 * 4 // 76px
+            },
+            'large': {
+                eventTitle: 45 * 4, // 180px
+                guestName: 32 * 4,  // 128px
+                guestTable: 24 * 4 // 96px
+            },
+            'xlarge': {
+                eventTitle: 55 * 4, // 220px
+                guestName: 40 * 4,  // 160px
+                guestTable: 30 * 4 // 120px
+            }
+        };
+
+        // --- INICIALIZACIÓN ---
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("DOMContentLoaded: Iniciando script.");
+            const urlParams = new URLSearchParams(window.location.search);
+            eventId = urlParams.get('eventId');
+            console.log("DOMContentLoaded: eventId obtenido:", eventId);
+
+            if (!eventId) {
+                errorState.textContent = "Error: No se ha especificado un ID de evento. Por favor, accede desde el Panel de Eventos.";
+                errorState.classList.remove('hidden');
+                console.error("Error: eventId no especificado.");
+                return;
+            }
+
+            onAuthStateChanged(auth, user => {
+                if (user) {
+                    console.log("onAuthStateChanged: Usuario autenticado:", user.uid);
+                    setupPageForEvent();
+                } else {
+                    console.log("onAuthStateChanged: No hay usuario autenticado. Intentando autenticación anónima...");
+                    signInAnonymously(auth).catch(error => {
+                        console.error("onAuthStateChanged: Error en autenticación anónima:", error);
+                        errorState.textContent = `Error de autenticación: ${error.message}. Recarga la página.`;
+                        errorState.classList.remove('hidden');
+                    });
+                }
+            }, (error) => {
+                console.error("onAuthStateChanged: Error en el listener de autenticación:", error);
+                errorState.textContent = `Error al verificar la autenticación: ${error.message}.`;
+                errorState.classList.remove('hidden');
+            });
+
+            generateCardsBtn.addEventListener('click', generateInvitationCards);
+            downloadAllInvitationsBtn.addEventListener('click', downloadAllInvitations);
+
+            // Listeners para los nuevos controles de estilo
+            imageFileInput.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        backgroundImageDataUrl = e.target.result;
+                        console.log("Imagen de fondo cargada."); 
+                        generateInvitationCards(); 
+                    };
+                    reader.onerror = (e) => {
+                        console.error("Error al leer el archivo de imagen:", e);
+                        backgroundImageDataUrl = ''; 
+                        alert("Error al cargar la imagen. Asegúrate de que es un archivo de imagen válido.");
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    backgroundImageDataUrl = ''; 
+                    generateInvitationCards(); 
+                }
+            });
+
+            fontSelect.addEventListener('change', generateInvitationCards);
+            fontSizeSelect.addEventListener('change', generateInvitationCards);
+            fontColorInput.addEventListener('input', generateInvitationCards); // Usar 'input' para cambios en tiempo real
+        });
+
+        async function setupPageForEvent() {
+            console.log("setupPageForEvent: Iniciando configuración de la página para el evento.");
+            loadingState.classList.remove('hidden');
+            emptyState.classList.add('hidden');
+            errorState.classList.add('hidden');
+            invitationCardsContainer.innerHTML = ''; 
+
+            const eventRef = doc(db, 'events', eventId);
+            try {
+                const eventSnap = await getDoc(eventRef);
+                if (eventSnap.exists()) {
+                    eventName = eventSnap.data().name; 
+                    eventNameHeader.textContent = `Invitaciones para: ${eventName}`;
+                    console.log("setupPageForEvent: Nombre del evento cargado:", eventName);
+                } else {
+                    eventNameHeader.textContent = "Evento no encontrado";
+                    errorState.textContent = "El evento especificado no fue encontrado.";
+                    errorState.classList.remove('hidden');
+                    console.warn("setupPageForEvent: Evento no encontrado para ID:", eventId);
+                    loadingState.classList.add('hidden');
+                    return;
+                }
+            } catch (error) {
+                console.error("setupPageForEvent: Error al obtener el nombre del evento:", error);
+                eventNameHeader.textContent = "Error al cargar el evento";
+                errorState.textContent = `Error al cargar la información del evento: ${error.message}.`;
+                errorState.classList.remove('hidden');
+                loadingState.classList.add('hidden');
+                return;
+            }
+
+            guestsCollection = collection(db, 'events', eventId, 'guests');
+            console.log("setupPageForEvent: Colección de invitados configurada:", `events/${eventId}/guests`);
+            listenForGuests(); 
+        }
+
+        function listenForGuests() {
+            console.log("listenForGuests: Iniciando listener de onSnapshot para invitados.");
+            onSnapshot(query(guestsCollection), (snapshot) => {
+                console.log("onSnapshot: Datos de invitados recibidos. Cantidad de documentos:", snapshot.docs.length);
+                loadingState.classList.add('hidden');
+                allGuests = [];
+                snapshot.forEach(doc => allGuests.push({ id: doc.id, ...doc.data() }));
+                allGuests.sort((a, b) => a.nombre.localeCompare(b.nombre));
+                
+                if (allGuests.length === 0) {
+                    emptyState.classList.remove('hidden');
+                    invitationCardsContainer.innerHTML = '';
+                    console.log("onSnapshot: No hay invitados en la lista.");
+                } else {
+                    emptyState.classList.add('hidden');
+                    generateInvitationCards(); 
+                    console.log("onSnapshot: Invitados cargados y tarjetas generadas.");
+                }
+            }, (error) => {
+                console.error("listenForGuests: Error en el listener de onSnapshot:", error);
+                errorState.textContent = `Error al cargar la lista de invitados: ${error.message}. Verifica tus reglas de seguridad de Firestore.`;
+                errorState.classList.remove('hidden');
+                loadingState.classList.add('hidden');
+            });
+        }
+
+        function generateInvitationCards() {
+            console.log("generateInvitationCards: Iniciando generación de tarjetas en pantalla.");
+            invitationCardsContainer.innerHTML = ''; 
+            
+            if (allGuests.length === 0) {
+                emptyState.classList.remove('hidden');
+                console.log("generateInvitationCards: No hay invitados para generar tarjetas.");
+                return;
+            }
+
+            const defaultImageUrl = 'https://placehold.co/300x450/e0e0e0/555555?text=Tu+Imagen+Aqui'; 
+            const currentFont = fontSelect.value;
+            const currentFontSizeSetting = fontSizeSelect.value;
+            const currentFontColor = fontColorInput.value;
+
+            // Usar los tamaños de fuente para la pantalla
+            const selectedSizes = FONT_SIZES_PX_SCREEN[currentFontSizeSetting];
+
+            allGuests.forEach(guest => {
+                const card = document.createElement('div');
+                card.className = 'invitation-card';
+
+                const backgroundDiv = document.createElement('div');
+                backgroundDiv.className = 'card-background';
+                backgroundDiv.style.backgroundImage = `url('${backgroundImageDataUrl || defaultImageUrl}')`;
+                
+                if (!backgroundImageDataUrl) { 
+                    const img = new Image();
+                    img.src = defaultImageUrl; 
+                    img.onerror = () => {
+                        console.warn(`Error al cargar la imagen de fondo. Usando placeholder.`);
+                        backgroundDiv.style.backgroundImage = `url('${defaultImageUrl}')`;
+                    };
+                }
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'card-content';
+
+                // Título del evento
+                const eventTitleEl = document.createElement('h4');
+                eventTitleEl.className = 'event-title';
+                eventTitleEl.textContent = eventName || 'Tu Evento';
+                eventTitleEl.style.fontFamily = currentFont;
+                eventTitleEl.style.fontSize = `${selectedSizes.eventTitle}px`; // Aplicar tamaño dinámico
+                eventTitleEl.style.color = currentFontColor; // Aplicar color dinámico
+
+                const guestNameEl = document.createElement('h3');
+                guestNameEl.className = 'guest-name';
+                guestNameEl.textContent = guest.nombre;
+                guestNameEl.style.fontFamily = currentFont;
+                guestNameEl.style.fontSize = `${selectedSizes.guestName}px`; // Aplicar tamaño dinámico
+                guestNameEl.style.color = currentFontColor; // Aplicar color dinámico
+
+                const guestTableEl = document.createElement('p');
+                guestTableEl.className = 'guest-table';
+                guestTableEl.textContent = `Mesa: ${guest.mesa}`;
+                guestTableEl.style.fontFamily = currentFont;
+                guestTableEl.style.fontSize = `${selectedSizes.guestTable}px`; // Aplicar tamaño dinámico
+                guestTableEl.style.color = currentFontColor; // Aplicar color dinámico
+
+                const qrCanvas = document.createElement('canvas');
+                qrCanvas.className = 'qr-code-canvas';
+                qrCanvas.width = 200; 
+                qrCanvas.height = 200;
+
+                const qrData = JSON.stringify({ eventId: eventId, guestId: guest.id });
+
+                try {
+                    new QRious({
+                        element: qrCanvas,
+                        value: qrData,
+                        size: 200,
+                        level: 'H' 
+                    });
+                } catch (e) {
+                    console.error(`Error al generar QR para ${guest.nombre}:`, e);
+                    const errorText = document.createElement('p');
+                    errorText.textContent = 'Error al generar QR.';
+                    errorText.style.color = 'red';
+                    qrCanvas.replaceWith(errorText); 
+                }
+
+                contentDiv.appendChild(eventTitleEl);
+                contentDiv.appendChild(guestNameEl);
+                contentDiv.appendChild(guestTableEl);
+                contentDiv.appendChild(qrCanvas);
+
+                card.appendChild(backgroundDiv);
+                card.appendChild(contentDiv);
+                invitationCardsContainer.appendChild(card);
+            });
+            console.log("generateInvitationCards: Generación de tarjetas en pantalla completada.");
+        }
+
+        async function downloadAllInvitations() {
+            console.log("downloadAllInvitations: Iniciando descarga de todas las invitaciones...");
+
+            if (allGuests.length === 0) {
+                alert("No hay invitados para generar invitaciones.");
+                console.log("downloadAllInvitations: No hay invitados, deteniendo el proceso.");
+                return;
+            }
+
+            loadingInvitationsMessage.style.display = 'block'; 
+            const zip = new JSZip();
+            
+            const scaleFactor = 4; // Factor de escalado para la descarga (4x resolución)
+            const cardWidth = 300 * scaleFactor; // 1200px
+            const cardHeight = 450 * scaleFactor; // 1800px
+            const qrSize = 200 * scaleFactor; // 800px
+
+            const currentFont = fontSelect.value;
+            const currentFontSizeSetting = fontSizeSelect.value;
+            const currentFontColor = fontColorInput.value;
+            const defaultImageUrl = 'https://placehold.co/300x450/e0e0e0/555555?text=Tu+Imagen+Aqui';
+
+            // Obtener los tamaños de fuente en píxeles para el canvas de descarga
+            const selectedSizes = FONT_SIZES_PX_DOWNLOAD[currentFontSizeSetting];
+
+            let imgToLoad = new Image();
+            let finalBackgroundImage = backgroundImageDataUrl || defaultImageUrl;
+
+            // Cargar la imagen de fondo una vez
+            await new Promise((resolve, reject) => {
+                imgToLoad.onload = () => resolve();
+                imgToLoad.onerror = () => {
+                    console.warn("Error al cargar la imagen de fondo para la descarga. Usando placeholder.");
+                    finalBackgroundImage = defaultImageUrl; 
+                    imgToLoad.src = defaultImageUrl; 
+                    imgToLoad.onload = () => resolve(); 
+                    imgToLoad.onerror = (e) => {
+                        console.error("Error incluso con la imagen de placeholder:", e);
+                        reject(new Error("No se pudo cargar ninguna imagen de fondo."));
+                    };
+                };
+                imgToLoad.src = finalBackgroundImage;
+            }).catch(error => {
+                loadingInvitationsMessage.style.display = 'none';
+                alert(error.message);
+                return; 
+            });
+
+            for (const guest of allGuests) {
+                console.log(`downloadAllInvitations: Generando invitación para: ${guest.nombre}`);
+                const canvas = document.createElement('canvas');
+                canvas.width = cardWidth;
+                canvas.height = cardHeight; 
+                const ctx = canvas.getContext('2d');
+
+                // 1. Dibujar la imagen de fondo
+                ctx.drawImage(imgToLoad, 0, 0, cardWidth, cardHeight);
+
+                // 3. Dibujar el QR
+                const qrCanvasTemp = document.createElement('canvas');
+                qrCanvasTemp.width = qrSize;
+                qrCanvasTemp.height = qrSize;
+                const qrData = JSON.stringify({ eventId: eventId, guestId: guest.id });
+                try {
+                    new QRious({
+                        element: qrCanvasTemp,
+                        value: qrData,
+                        size: qrSize,
+                        level: 'H'
+                    });
+                    // Dibujar el QR en el canvas principal
+                    const qrX = (cardWidth - qrSize) / 2;
+                    const qrY = cardHeight - qrSize - (20 * scaleFactor); // 20px de padding desde abajo escalado
+                    ctx.fillStyle = "white"; 
+                    ctx.fillRect(qrX - (5 * scaleFactor), qrY - (5 * scaleFactor), qrSize + (10 * scaleFactor), qrSize + (10 * scaleFactor)); 
+                    ctx.drawImage(qrCanvasTemp, qrX, qrY);
+                } catch (e) {
+                    console.error(`Error al generar QR para ${guest.nombre} en descarga:`, e);
+                    ctx.fillStyle = "red";
+                    ctx.font = `${16 * scaleFactor}px Arial`; // Escalar fuente de error
+                    ctx.textAlign = "center";
+                    ctx.fillText("Error QR", cardWidth / 2, cardHeight - qrSize / 2 - (20 * scaleFactor));
+                }
+                
+                // 4. Dibujar el texto (Título del evento, Nombre, Mesa)
+                ctx.fillStyle = currentFontColor; // Aplicar color de fuente seleccionado
+                ctx.textAlign = "center";
+                ctx.textBaseline = "top";
+
+                // Título del Evento
+                ctx.font = `700 ${selectedSizes.eventTitle}px "${currentFont}"`;
+                let currentY = (30 * scaleFactor); // Posición Y inicial escalada
+                ctx.fillText(eventName || 'Tu Evento', cardWidth / 2, currentY); 
+
+                // Nombre del Invitado
+                currentY += selectedSizes.eventTitle + (15 * scaleFactor); // Ajustar Y basado en el tamaño anterior + padding escalado
+                ctx.font = `600 ${selectedSizes.guestName}px "${currentFont}"`;
+                ctx.fillText(guest.nombre, cardWidth / 2, currentY); 
+
+                // Mesa
+                currentY += selectedSizes.guestName + (10 * scaleFactor); // Ajustar Y basado en el tamaño anterior + padding escalado
+                ctx.font = `500 ${selectedSizes.guestTable}px "${currentFont}"`; 
+                ctx.fillText(`Mesa: ${guest.mesa}`, cardWidth / 2, currentY); 
+
+                const imgData = canvas.toDataURL("image/png");
+                const base64Data = imgData.replace(/^data:image\/(png|jpg);base64,/, "");
+                
+                const fileName = `${guest.nombre.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_Invitacion.png`;
+                zip.file(fileName, base64Data, { base64: true });
+                await new Promise(resolve => setTimeout(resolve, 10)); 
+            }
+
+            zip.generateAsync({ type: "blob" })
+                .then(function(content) {
+                    saveAs(content, `${eventName || 'evento'}_Invitaciones.zip`);
+                    loadingInvitationsMessage.style.display = 'none'; 
+                    console.log("downloadAllInvitations: ZIP de invitaciones generado y descargado.");
+                })
+                .catch(error => {
+                    console.error("downloadAllInvitations: Error al generar el ZIP:", error);
+                    alert("Error al generar el archivo ZIP de invitaciones. Revisa la consola para más detalles.");
+                    loadingInvitationsMessage.style.display = 'none'; 
+                });
+        }
+    </script>
+</body>
+</html>
