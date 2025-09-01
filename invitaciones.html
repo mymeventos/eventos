@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Generar invitaciones</title>
+
+  <!-- Tailwind (ok para prototipo; para prod conviene build local) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Fuentes -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet"/>
+
+  <!-- Librerías auxiliares -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <style>
+    :root{
+      --card-w: 500px;   /* tamaño preview */
+      --card-h: 800px;
+      --card-r: 16px;
+    }
+    body{ font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #invitation-card-preview{
+      width: var(--card-w);
+      height: var(--card-h);
+      border-radius: var(--card-r);
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(180deg,#fafafa,#eee);
+      box-shadow: 0 10px 25px rgba(0,0,0,.08);
+    }
+    .bg-image{
+      position:absolute; inset:0;
+      background-size: cover;
+      background-position: center;
+      filter: saturate(1);
+    }
+    .text-draggable-wrapper{
+      position:absolute;
+      border: 1px dashed transparent;
+      border-radius: 8px;
+      padding: 4px;
+      cursor: move;
+      user-select: none;
+    }
+    .text-draggable-wrapper.active{ border-color: rgba(79,70,229,.6); background: rgba(79,70,229,.06); }
+    .text-el{
+      display:block;
+      width: 100%;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      line-height: 1.2;
+      text-shadow: 0 1px 0 rgba(0,0,0,.04);
+    }
+    .handle{ position:absolute; width:12px; height:12px; background:#4f46e5; bottom:-6px; right:-6px; border-radius:999px; cursor:nwse-resize; }
+    #loading-invitations-message{
+      display:none; position:fixed; inset:0; background:rgba(0,0,0,.55);
+      color:#fff; z-index:50; align-items:center; justify-content:center; font-size:1.1rem; text-align:center; padding:24px;
+    }
+    .control-label{ @apply text-sm font-medium text-gray-700; }
+    .control-row{ @apply grid grid-cols-2 gap-3; }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+  <div class="container mx-auto max-w-7xl p-4 lg:p-8">
+    <header class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-bold">Generador de Invitaciones</h1>
+        <p id="event-name" class="text-indigo-600 font-semibold mt-1"></p>
+      </div>
+      <a href="selector_de_eventos.html" class="text-indigo-600 hover:text-indigo-800 font-medium">← Volver</a>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Panel de controles -->
+      <aside class="bg-white rounded-xl shadow p-5 lg:col-span-1">
+        <h2 class="text-lg font-semibold mb-4">Diseño</h2>
+
+        <div class="mb-4">
+          <label class="control-label block mb-1">Fondo (imagen)</label>
+          <input id="bgFile" type="file" accept="image/*" class="w-full border rounded px-3 py-2">
+          <p class="text-xs text-gray-500 mt-1">Tip: usá una imagen con proporción similar a la tarjeta.</p>
+        </div>
+
+        <div class="mb-4">
+          <label class="control-label block mb-1">Tipografía</label>
+          <select id="fontSelect" class="w-full border rounded px-3 py-2">
+            <option value="Inter, sans-serif">Inter</option>
+            <option value="'Playfair Display', serif">Playfair Display</option>
+            <option value="'Great Vibes', cursive">Great Vibes</option>
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="control-label block mb-1">Color de texto</label>
+          <input id="fontColor" type="color" value="#111111" class="w-full h-10 border rounded">
+        </div>
+
+        <div class="mb-5">
+          <div class="flex items-center gap-3">
+            <input id="toggleEventTitle" type="checkbox" class="h-4 w-4 text-indigo-600" checked>
+            <label for="toggleEventTitle" class="control-label">Mostrar título del evento</label>
+          </div>
+          <div class="flex items-center gap-3 mt-2">
+            <input id="toggleGuestName" type="checkbox" class="h-4 w-4 text-indigo-600" checked>
+            <label for="toggleGuestName" class="control-label">Mostrar nombre</label>
+          </div>
+          <div class="flex items-center gap-3 mt-2">
+            <input id="toggleGuestTable" type="checkbox" class="h-4 w-4 text-indigo-600" checked>
+            <label for="toggleGuestTable" class="control-label">Mostrar mesa</label>
+          </div>
+          <div class="flex items-center gap-3 mt-2">
+            <input id="toggleQR" type="checkbox" class="h-4 w-4 text-indigo-600">
+            <label for="toggleQR" class="control-label">Agregar QR en la tarjeta</label>
+          </div>
+        </div>
+
+        <!-- Controles específicos de cada bloque -->
+        <details class="mb-4" open>
+          <summary class="font-semibold cursor-pointer mb-2">Título del evento</summary>
+          <div class="control-row">
+            <label class="control-label">X (%)</label><input id="eventTitleX" type="range" min="0" max="100" value="50">
+            <label class="control-label">Y (%)</label><input id="eventTitleY" type="range" min="0" max="100" value="20">
+            <label class="control-label">Ancho (%)</label><input id="eventTitleW" type="range" min="10" max="100" value="80">
+            <label class="control-label">Tamaño</label>
+            <select id="eventTitleSize">
+              <option value="sm">Peq</option><option value="md" selected>Med</option><option value="lg">Gra</option>
+            </select>
+            <label class="control-label">Espaciado</label><input id="eventTitleSpacing" type="number" step="0.5" value="0">
+            <label class="control-label">Alineación</label>
+            <select id="eventTitleAlign">
+              <option value="left">Izq</option><option value="center" selected>Centro</option><option value="right">Der</option>
+            </select>
+          </div>
+        </details>
+
+        <details class="mb-4" open>
+          <summary class="font-semibold cursor-pointer mb-2">Nombre invitado</summary>
+          <div class="control-row">
+            <label class="control-label">X (%)</label><input id="guestNameX" type="range" min="0" max="100" value="50">
+            <label class="control-label">Y (%)</label><input id="guestNameY" type="range" min="0" max="100" value="50">
+            <label class="control-label">Ancho (%)</label><input id="guestNameW" type="range" min="10" max="100" value="80">
+            <label class="control-label">Tamaño</label>
+            <select id="guestNameSize">
+              <option value="sm">Peq</option><option value="md" selected>Med</option><option value="lg">Gra</option>
+            </select>
+            <label class="control-label">Espaciado</label><input id="guestNameSpacing" type="number" step="0.5" value="0">
+            <label class="control-label">Alineación</label>
+            <select id="guestNameAlign">
+              <option value="left">Izq</option><option value="center" selected>Centro</option><option value="right">Der</option>
+            </select>
+          </div>
+        </details>
+
+        <details class="mb-6" open>
+          <summary class="font-semibold cursor-pointer mb-2">Mesa</summary>
+          <div class="control-row">
+            <label class="control-label">X (%)</label><input id="guestTableX" type="range" min="0" max="100" value="50">
+            <label class="control-label">Y (%)</label><input id="guestTableY" type="range" min="0" max="100" value="65">
+            <label class="control-label">Ancho (%)</label><input id="guestTableW" type="range" min="10" max="100" value="60">
+            <label class="control-label">Tamaño</label>
+            <select id="guestTableSize">
+              <option value="sm" selected>Peq</option><option value="md">Med</option><option value="lg">Gra</option>
+            </select>
+            <label class="control-label">Espaciado</label><input id="guestTableSpacing" type="number" step="0.5" value="0">
+            <label class="control-label">Alineación</label>
+            <select id="guestTableAlign">
+              <option value="left">Izq</option><option value="center" selected>Centro</option><option value="right">Der</option>
+            </select>
+          </div>
+        </details>
+
+        <div class="space-y-3">
+          <button id="downloadAllInvitationsBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-md shadow">Descargar Invitaciones (ZIP)</button>
+          <button id="downloadOneBtn" class="w-full bg-gray-800 hover:bg-black text-white font-semibold py-2 rounded-md">Descargar la que se ve</button>
+        </div>
+      </aside>
+
+      <!-- Preview -->
+      <main class="lg:col-span-2">
+        <div id="preview-panel" class="flex flex-col items-center gap-4">
+          <div id="invitation-card-preview">
+            <div id="bg" class="bg-image"></div>
+
+            <div id="wrapEventTitle" class="text-draggable-wrapper" data-target="eventTitle" style="left:10%; top:14%; width:80%">
+              <span id="eventTitle" class="text-el" style="font-weight:700; font-size:28px; text-align:center;">Título del Evento</span>
+              <span class="handle"></span>
+            </div>
+
+            <div id="wrapGuestName" class="text-draggable-wrapper" data-target="guestName" style="left:10%; top:46%; width:80%">
+              <span id="guestName" class="text-el" style="font-weight:600; font-size:26px; text-align:center;">Nombre del Invitado</span>
+              <span class="handle"></span>
+            </div>
+
+            <div id="wrapGuestTable" class="text-draggable-wrapper" data-target="guestTable" style="left:20%; top:60%; width:60%">
+              <span id="guestTable" class="text-el" style="font-weight:500; font-size:18px; text-align:center;">Mesa: 1</span>
+              <span class="handle"></span>
+            </div>
+
+            <canvas id="qrCanvas" width="160" height="160" style="position:absolute; left:calc(50% - 80px); bottom:28px; display:none;"></canvas>
+          </div>
+
+          <p id="guestCount" class="text-sm text-gray-500"></p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="loading-invitations-message" class="flex">
+    <div>
+      <div class="animate-spin mx-auto mb-3 h-8 w-8 border-2 border-white/70 border-t-transparent rounded-full"></div>
+      <div>Generando invitaciones para descargar…</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getFirestore, collection, doc, getDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+    // === Firebase (cabina-vf) ===
+    // Tomado del landing del mismo proyecto para mantener consistencia. :contentReference[oaicite:4]{index=4}
+    const firebaseConfig = {
+      apiKey: "AIzaSyAuwXqnKwKfZG8y7NhxPwNiRL18kdTUZkM",
+      authDomain: "cabina-vf.firebaseapp.com",
+      projectId: "cabina-vf",
+      storageBucket: "cabina-vf.firebasestorage.app",
+      messagingSenderId: "842124381444",
+      appId: "1:842124381444:web:db7fc8c83b0aa930fb1451"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
+    const auth = getAuth(app);
+
+    // === Estado ===
+    const url = new URLSearchParams(location.search);
+    const eventId = url.get('eventId'); // viene desde selector_de_eventos.html :contentReference[oaicite:5]{index=5}
+    const PREVIEW_W = 500, PREVIEW_H = 800; // preview
+    const EXPORT_W = 1400, EXPORT_H = 2240; // export (buena calidad)
+    let guests = [];
+    let currentIndex = 0;
+    let eventName = '';
+
+    // === DOM ===
+    const eventNameEl = document.getElementById('event-name');
+    const bgFile = document.getElementById('bgFile');
+    const bgDiv  = document.getElementById('bg');
+
+    const wrapEventTitle = document.getElementById('wrapEventTitle');
+    const wrapGuestName  = document.getElementById('wrapGuestName');
+    const wrapGuestTable = document.getElementById('wrapGuestTable');
+
+    const eventTitleEl = document.getElementById('eventTitle');
+    const guestNameEl  = document.getElementById('guestName');
+    const guestTableEl = document.getElementById('guestTable');
+
+    const fontSelect = document.getElementById('fontSelect');
+    const fontColor  = document.getElementById('fontColor');
+
+    const toggleEventTitle = document.getElementById('toggleEventTitle');
+    const toggleGuestName  = document.getElementById('toggleGuestName');
+    const toggleGuestTable = document.getElementById('toggleGuestTable');
+    const toggleQR         = document.getElementById('toggleQR');
+    const qrCanvas         = document.getElementById('qrCanvas');
+
+    const eventTitleX = document.getElementById('eventTitleX');
+    const eventTitleY = document.getElementById('eventTitleY');
+    const eventTitleW = document.getElementById('eventTitleW');
+    const eventTitleSize = document.getElementById('eventTitleSize');
+    const eventTitleSpacing = document.getElementById('eventTitleSpacing');
+    const eventTitleAlign = document.getElementById('eventTitleAlign');
+
+    const guestNameX = document.getElementById('guestNameX');
+    const guestNameY = document.getElementById('guestNameY');
+    const guestNameW = document.getElementById('guestNameW');
+    const guestNameSize = document.getElementById('guestNameSize');
+    const guestNameSpacing = document.getElementById('guestNameSpacing');
+    const guestNameAlign = document.getElementById('guestNameAlign');
+
+    const guestTableX = document.getElementById('guestTableX');
+    const guestTableY = document.getElementById('guestTableY');
+    const guestTableW = document.getElementById('guestTableW');
+    const guestTableSize = document.getElementById('guestTableSize');
+    const guestTableSpacing = document.getElementById('guestTableSpacing');
+    const guestTableAlign = document.getElementById('guestTableAlign');
+
+    const downloadAllBtn = document.getElementById('downloadAllInvitationsBtn');
+    const downloadOneBtn = document.getElementById('downloadOneBtn');
+    const loadingModal = document.getElementById('loading-invitations-message');
+    const guestCountEl = document.getElementById('guestCount');
+
+    // === Helpers de drag/resize sobre el preview ===
+    makeDraggable(wrapEventTitle);
+    makeDraggable(wrapGuestName);
+    makeDraggable(wrapGuestTable);
+
+    function makeDraggable(wrapper){
+      let startX=0, startY=0, startW=0, isDrag=false, isResize=false;
+      const handle = wrapper.querySelector('.handle');
+
+      wrapper.addEventListener('pointerdown', (e)=>{
+        wrapper.classList.add('active');
+        const rect = wrapper.getBoundingClientRect();
+        const nearHandle = e.target===handle;
+        isResize = nearHandle; isDrag = !nearHandle;
+        startX = e.clientX; startY = e.clientY; startW = rect.width;
+        wrapper.setPointerCapture(e.pointerId);
+      });
+
+      wrapper.addEventListener('pointermove', (e)=>{
+        if(!isDrag && !isResize) return;
+        const cardRect = document.getElementById('invitation-card-preview').getBoundingClientRect();
+        const rect = wrapper.getBoundingClientRect();
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        if(isDrag){
+          const left = Math.max(0, Math.min(cardRect.width - rect.width, rect.left - cardRect.left + dx));
+          const top  = Math.max(0, Math.min(cardRect.height - rect.height, rect.top - cardRect.top + dy));
+          wrapper.style.left = (left / cardRect.width * 100).toFixed(2) + '%';
+          wrapper.style.top  = (top  / cardRect.height* 100).toFixed(2) + '%';
+        }else if(isResize){
+          const newW = Math.max(60, startW + dx);
+          wrapper.style.width = newW + 'px';
+        }
+        startX = e.clientX; startY = e.clientY;
+        syncControlsFromWrappers();
+      });
+
+      wrapper.addEventListener('pointerup', ()=>{
+        isDrag=false; isResize=false; wrapper.releasePointerCapture;
+        wrapper.classList.remove('active');
+      });
+    }
+
+    function syncControlsFromWrappers(){
+      const card = document.getElementById('invitation-card-preview').getBoundingClientRect();
+
+      const r1 = wrapEventTitle.getBoundingClientRect();
+      eventTitleX.value = ((r1.left - card.left)/card.width*100).toFixed(0);
+      eventTitleY.value = ((r1.top  - card.top )/card.height*100).toFixed(0);
+      eventTitleW.value = (r1.width/card.width*100).toFixed(0);
+
+      const r2 = wrapGuestName.getBoundingClientRect();
+      guestNameX.value = ((r2.left - card.left)/card.width*100).toFixed(0);
+      guestNameY.value = ((r2.top  - card.top )/card.height*100).toFixed(0);
+      guestNameW.value = (r2.width/card.width*100).toFixed(0);
+
+      const r3 = wrapGuestTable.getBoundingClientRect();
+      guestTableX.value = ((r3.left - card.left)/card.width*100).toFixed(0);
+      guestTableY.value = ((r3.top  - card.top )/card.height*100).toFixed(0);
+      guestTableW.value = (r3.width/card.width*100).toFixed(0);
+    }
+
+    // === UI bindings ===
+    [fontSelect, fontColor, toggleEventTitle, toggleGuestName, toggleGuestTable, toggleQR,
+     eventTitleX, eventTitleY, eventTitleW, eventTitleSize, eventTitleSpacing, eventTitleAlign,
+     guestNameX, guestNameY, guestNameW, guestNameSize, guestNameSpacing, guestNameAlign,
+     guestTableX, guestTableY, guestTableW, guestTableSize, guestTableSpacing, guestTableAlign
+    ].forEach(el => el.addEventListener('input', renderPreview));
+
+    bgFile.addEventListener('change', e=>{
+      const f = e.target.files?.[0]; if(!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { bgDiv.style.backgroundImage = `url('${reader.result}')`; };
+      reader.readAsDataURL(f);
+    });
+
+    downloadAllBtn.addEventListener('click', downloadAll);
+    downloadOneBtn.addEventListener('click', () => downloadCanvasForGuest(guests[currentIndex] || null, true));
+
+    // === Cargar datos ===
+    if(!eventId){
+      document.body.innerHTML = '<div class="p-8 text-center text-red-600">Falta el parámetro <strong>eventId</strong>.</div>';
+    }else{
+      onAuthStateChanged(auth, async user=>{
+        if(!user) await signInAnonymously(auth);
+        await fetchEvent();
+        await fetchGuests();
+        renderPreview();
+      });
+    }
+
+    async function fetchEvent(){
+      const ref = doc(db, 'events', eventId);
+      const snap = await getDoc(ref);
+      if (snap.exists()){
+        const data = snap.data();
+        eventName = data?.name || 'Evento';
+        eventNameEl.textContent = eventName;
+        eventTitleEl.textContent = eventName;
+      }else{
+        eventName = 'Evento';
+        eventNameEl.textContent = 'Evento no encontrado';
+      }
+    }
+
+    async function fetchGuests(){
+      const qs = await getDocs(query(collection(db,'events',eventId,'guests'), orderBy('nombre','asc')));
+      guests = qs.docs.map(d=>({id:d.id, ...d.data()}));
+      guestCountEl.textContent = `${guests.length} invitado(s)`;
+      if(guests.length){
+        currentIndex = 0;
+        updatePreviewGuest(guests[0]);
+      }
+    }
+
+    function updatePreviewGuest(g){
+      guestNameEl.textContent  = (g?.nombre)||'Nombre del Invitado';
+      guestTableEl.textContent = 'Mesa: ' + (g?.mesa ?? '—');
+      if(toggleQR.checked){
+        drawQR(qrCanvas, JSON.stringify({ eventId, guestId: g?.id || 'preview' }));
+        qrCanvas.style.display = 'block';
+      } else {
+        qrCanvas.style.display = 'none';
+      }
+    }
+
+    function drawQR(canvas, value){
+      const size = 160;
+      canvas.width = size; canvas.height = size;
+      new QRious({ element: canvas, value, size, level:'H' });
+    }
+
+    function renderPreview(){
+      // aplicar tipografía/colores
+      const ff = fontSelect.value, color = fontColor.value;
+      [eventTitleEl, guestNameEl, guestTableEl].forEach(el=>{
+        el.style.fontFamily = ff; el.style.color = color;
+      });
+
+      // mostrar/ocultar
+      wrapEventTitle.style.display = toggleEventTitle.checked ? 'block' : 'none';
+      wrapGuestName.style.display  = toggleGuestName.checked  ? 'block' : 'none';
+      wrapGuestTable.style.display = toggleGuestTable.checked ? 'block' : 'none';
+      qrCanvas.style.display       = toggleQR.checked         ? 'block' : 'none';
+
+      // posiciones (en %)
+      const card = document.getElementById('invitation-card-preview');
+      const W = card.clientWidth, H = card.clientHeight;
+
+      place(wrapEventTitle, eventTitleX.value, eventTitleY.value, eventTitleW.value);
+      place(wrapGuestName , guestNameX.value , guestNameY.value , guestNameW.value );
+      place(wrapGuestTable, guestTableX.value, guestTableY.value, guestTableW.value);
+
+      // tamaños + espaciado + alineación
+      applyText(eventTitleEl, eventTitleSize.value, eventTitleSpacing.value, eventTitleAlign.value);
+      applyText(guestNameEl , guestNameSize.value , guestNameSpacing.value , guestNameAlign.value );
+      applyText(guestTableEl, guestTableSize.value, guestTableSpacing.value, guestTableAlign.value);
+
+      function place(wrapper, xPct, yPct, wPct){
+        wrapper.style.left = (+xPct).toFixed(2)+'%';
+        wrapper.style.top  = (+yPct).toFixed(2)+'%';
+        wrapper.style.width= (+wPct).toFixed(2)+'%';
+      }
+      function applyText(el, sizeKey, spacing, align){
+        const sizes = { sm: 18, md: 26, lg: 34 };
+        el.style.letterSpacing = `${spacing}px`;
+        el.style.textAlign = align;
+        el.style.fontSize = sizes[sizeKey]+'px';
+      }
+    }
+
+    // === Exportar ===
+    async function downloadAll(){
+      if (!guests.length){ alert('No hay invitados.'); return; }
+      loadingModal.style.display='flex';
+      try{
+        const zip = new JSZip();
+        for (const g of guests){
+          const blob = await renderCanvasBlob(g);
+          const safe = (g.nombre||'Invitado').replace(/[^a-zA-Z0-9\s-]/g,'').replace(/\s+/g,'_');
+          zip.file(`${safe}_Invitacion.png`, blob);
+          await new Promise(r=>setTimeout(r,8)); // respiro
+        }
+        const content = await zip.generateAsync({type:'blob'});
+        saveAs(content, `${(eventName||'evento')}_Invitaciones.zip`);
+      }catch(e){
+        console.error(e);
+        alert('Error al generar el ZIP. Revisá la consola.');
+      }finally{
+        loadingModal.style.display='none';
+      }
+    }
+
+    async function downloadCanvasForGuest(guest, downloadDirect=false){
+      const g = guest || guests[currentIndex] || null;
+      if(!g){ alert('No hay invitado para previsualizar.'); return; }
+      const blob = await renderCanvasBlob(g);
+      const safe = (g.nombre||'Invitado').replace(/[^a-zA-Z0-9\s-]/g,'').replace(/\s+/g,'_');
+      saveAs(blob, `${safe}_Invitacion.png`);
+    }
+
+    async function renderCanvasBlob(guest){
+      // Crear canvas de salida
+      const canvas = document.createElement('canvas');
+      canvas.width = EXPORT_W; canvas.height = EXPORT_H;
+      const ctx = canvas.getContext('2d');
+
+      // Fondo
+      await paintBackground(ctx);
+
+      // Texto
+      const showEvent = toggleEventTitle.checked;
+      const showName  = toggleGuestName.checked;
+      const showTable = toggleGuestTable.checked;
+
+      const ff = fontSelect.value.split(',')[0].replace(/['"]/g,'');
+      const color = fontColor.value;
+
+      // Escalado desde preview a export
+      const scaleX = EXPORT_W / PREVIEW_W;
+      const scaleY = EXPORT_H / PREVIEW_H;
+
+      // Recoger posiciones/tamaños desde wrappers
+      function rectFrom(wrapper){
+        const cardRect = document.getElementById('invitation-card-preview').getBoundingClientRect();
+        const r = wrapper.getBoundingClientRect();
+        return {
+          x: (r.left - cardRect.left)*scaleX,
+          y: (r.top  - cardRect.top )*scaleY,
+          w: (r.width)*scaleX
+        }
+      }
+      const rTitle = rectFrom(wrapEventTitle);
+      const rName  = rectFrom(wrapGuestName);
+      const rTable = rectFrom(wrapGuestTable);
+
+      // Mapeo de tamaños (preview -> export)
+      const SIZE_MAP = { sm: 18, md: 26, lg: 34 };
+      const titlePx = SIZE_MAP[eventTitleSize.value] * scaleX;
+      const namePx  = SIZE_MAP[guestNameSize.value]  * scaleX;
+      const tablePx = SIZE_MAP[guestTableSize.value] * scaleX;
+
+      ctx.fillStyle = color;
+      ctx.textBaseline = 'top';
+
+      // función de texto con ancho + alineación + letter-spacing
+      function drawTextBlock(text, rect, px, spacing, align, weight='600'){
+        if(!text) return;
+        ctx.font = `${weight} ${px}px ${ff}`;
+        const lines = wrapText(ctx, text, rect.w, spacing);
+        let x = rect.x, y = rect.y;
+        for(const line of lines){
+          let lineW = measureWithSpacing(ctx, line, spacing);
+          let startX = x;
+          if (align==='center') startX = x + (rect.w - lineW)/2;
+          if (align==='right')  startX = x + (rect.w - lineW);
+          let cx = startX;
+          for (const ch of line){
+            ctx.fillText(ch, cx, y);
+            cx += ctx.measureText(ch).width + (+spacing);
+          }
+          y += px * 1.2;
+        }
+      }
+
+      if (showEvent) drawTextBlock(eventName, rTitle, titlePx, +eventTitleSpacing.value, eventTitleAlign.value, '700');
+      if (showName)  drawTextBlock(guest?.nombre||'', rName,  namePx,  +guestNameSpacing.value,  guestNameAlign.value,  '600');
+      if (showTable) drawTextBlock(`Mesa: ${guest?.mesa ?? '—'}`, rTable, tablePx, +guestTableSpacing.value, guestTableAlign.value, '500');
+
+      // QR
+      if (toggleQR.checked){
+        const qrSize = 220; // export
+        const qrX = (EXPORT_W - qrSize)/2;
+        const qrY = EXPORT_H - qrSize - 60;
+        // generamos QR en canvas aparte
+        const tmp = document.createElement('canvas');
+        new QRious({ element: tmp, value: JSON.stringify({eventId, guestId: guest?.id || 'preview'}), size: qrSize, level:'H' });
+        ctx.drawImage(tmp, qrX, qrY, qrSize, qrSize);
+      }
+
+      return await new Promise(res=> canvas.toBlob(b=>res(b), 'image/png'));
+
+      // helpers de texto
+      function wrapText(context, text, maxW, spacing){
+        const words = text.split(/\s+/);
+        const lines = [];
+        let line = '';
+        for (const w of words){
+          const test = (line? line+' ' : '') + w;
+          if (measureWithSpacing(context, test, spacing) <= maxW) line = test;
+          else { if(line) lines.push(line); line = w; }
+        }
+        if(line) lines.push(line);
+        return lines;
+      }
+      function measureWithSpacing(context, text, spacing){
+        let total = 0;
+        for (const ch of text) total += context.measureText(ch).width + (+spacing);
+        return total;
+      }
+    }
+
+    async function paintBackground(ctx){
+      // Si hay imagen de fondo en preview, la usamos
+      const style = bgDiv.style.backgroundImage;
+      if(style && style.startsWith('url(')){
+        const url = style.slice(5,-2);
+        const img = await loadImage(url);
+        // cubrir (cover)
+        const s = cover(EXPORT_W, EXPORT_H, img.width, img.height);
+        ctx.drawImage(img, s.sx, s.sy, s.sw, s.sh, 0, 0, EXPORT_W, EXPORT_H);
+      }else{
+        const grd = ctx.createLinearGradient(0,0,0,EXPORT_H);
+        grd.addColorStop(0,'#fafafa'); grd.addColorStop(1,'#eaeaea');
+        ctx.fillStyle = grd; ctx.fillRect(0,0,EXPORT_W,EXPORT_H);
+      }
+    }
+
+    function loadImage(src){
+      return new Promise((res,rej)=>{
+        const img = new Image(); img.crossOrigin = 'anonymous';
+        img.onload=()=>res(img); img.onerror=rej; img.src=src;
+      });
+    }
+    function cover(dstW,dstH,srcW,srcH){
+      const r = Math.max(dstW/srcW, dstH/srcH);
+      const w = srcW*r, h = srcH*r;
+      const sx = (w - dstW)/2 / r;
+      const sy = (h - dstH)/2 / r;
+      const sw = dstW / r, sh = dstH / r;
+      return {sx,sy,sw,sh};
+    }
+
+    // actualizar invitado en preview cuando hagas click (simple con flechas izq/der)
+    document.addEventListener('keydown', (e)=>{
+      if(!guests.length) return;
+      if(e.key==='ArrowRight'){ currentIndex = (currentIndex+1)%guests.length; updatePreviewGuest(guests[currentIndex]); }
+      if(e.key==='ArrowLeft'){ currentIndex = (currentIndex-1+guests.length)%guests.length; updatePreviewGuest(guests[currentIndex]); }
+    });
+  </script>
+</body>
+</html>

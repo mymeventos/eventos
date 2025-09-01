@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pantalla Evento - Cabina VF</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background-color: #f9fafb;
+    }
+    main {
+      display: flex;
+      height: 100vh;
+    }
+    .left, .right {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .left {
+      background-color: #ffffff;
+      border-right: 1px solid #e5e7eb;
+    }
+    .right {
+      background-color: #f3f4f6;
+    }
+    h2 {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .item {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+  <main id="main-content">
+    <div class="left" id="bloque-horario">
+      <h2>Horario</h2>
+      <div class="left-zoomed-content"></div>
+    </div>
+    <div class="right" id="panel-derecho">
+      <h2>Panel Derecho</h2>
+      <div class="right-zoomed-content"></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getFirestore, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+    // 🔹 Config cabina-vf
+    const firebaseConfig = {
+      apiKey: "AIzaSyBke-Q86R07eDEI35H63HgyEhXzoF0xwP0",
+      authDomain: "cabina-vf.firebaseapp.com",
+      projectId: "cabina-vf",
+      storageBucket: "cabina-vf.firebasestorage.app",
+      messagingSenderId: "1053336604586",
+      appId: "1:1053336604586:web:b15f5c72d97a8051acb28b"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    const bloqueHorario = document.querySelector(".left-zoomed-content");
+    const panelDerecho = document.querySelector(".right-zoomed-content");
+
+    function renderItem(data) {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <p><strong>${data.title || "Sin título"}</strong></p>
+        <p>${data.description || ""}</p>
+        <p><em>${data.time || ""}</em></p>
+      `;
+      return div;
+    }
+
+    function setupListeners() {
+      const q = query(collection(db, "agenda"));
+      onSnapshot(q, (snapshot) => {
+        bloqueHorario.innerHTML = "";
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          bloqueHorario.appendChild(renderItem(data));
+        });
+      });
+
+      const q2 = query(collection(db, "panel"));
+      onSnapshot(q2, (snapshot) => {
+        panelDerecho.innerHTML = "";
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          panelDerecho.appendChild(renderItem(data));
+        });
+      });
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log("✅ Usuario autenticado:", user.uid);
+        setupListeners();
+      } else {
+        signInAnonymously(auth).catch((error) => {
+          console.error("Error en autenticación anónima:", error);
+        });
+      }
+    });
+  </script>
+</body>
+</html>
